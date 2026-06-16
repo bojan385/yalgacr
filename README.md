@@ -200,9 +200,6 @@ intentionally **not** tracked in git (see `.gitignore`):
 
 ## Security
 
-* `lgac-config.json` contains a session secret and password hashes — never
-  commit it, and do not expose the web app to the public internet without
-  HTTPS and strong credentials.
 * Change the default `admin` / `admin` login before first real use.
 
 ## Limitations and extending
