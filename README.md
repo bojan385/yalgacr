@@ -273,4 +273,4 @@ and contributors for the groundwork.
 This project is licensed under the **GNU General Public License v2.0** — see
 the [LICENSE](LICENSE) file for the full text.
 
-Copyright (C) 2026 &lt;Bojan&gt;
+Copyright (C) 2026 Bojan
