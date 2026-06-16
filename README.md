@@ -17,10 +17,7 @@ Two independent front-ends share the same verified encoder:
 
 ## Screenshots
 
-_Add your own screenshots to the `screenshots/` folder and reference them here:_
-
-![Main control panel](screenshots/web-main.png)
-![Settings page](screenshots/web-settings.png)
+![Main control panel](screenshots/web-main_small.png)
 
 ## Features
 
