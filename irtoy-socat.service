@@ -1,0 +1,58 @@
+# /etc/systemd/system/irtoy-socat.service on RPI B (192.168.200.24)
+# Shares USB IR Toy v2 over TCP 2000 using socat.
+#
+# Install:
+#   sudo cp irtoy-socat.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now irtoy-socat
+#   systemctl status irtoy-socat
+
+[Unit]
+Description=IR Toy serial-over-TCP bridge (socat)
+After=network-online.target
+Wants=network-online.target
+# If the device is unplugged, don't thrash forever: give up after repeated
+# fast failures (see StartLimit* below) and let a manual restart recover.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat -d TCP-LISTEN:2000,reuseaddr,fork /dev/ttyACM0,raw,echo=0,b115200
+Restart=always
+RestartSec=2
+
+# --- Security hardening ---
+# Run as an unprivileged dynamic user instead of root.
+DynamicUser=yes
+# IR Toy is in the 'dialout' group; grant access to the serial device.
+SupplementaryGroups=dialout
+# Lock down the filesystem: read-only system, private tmp, no home access.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Block whole classes of attack surface the bridge never needs.
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# Only allow the address families socat actually uses here.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Device access policy: deny all devices, then allow only the IR Toy's
+# tty class. (char-misc covers cdc_acm ttyACM nodes.)
+DevicePolicy=closed
+DeviceAllow=/dev/ttyACM0 rw
+# Resource caps so a runaway can't take down the Pi Zero.
+LimitNOFILE=256
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

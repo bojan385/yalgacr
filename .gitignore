@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Yalgacr runtime data (DO NOT COMMIT) ---
+# These hold the session secret, password hashes, live state and the audit log.
+lgac-config.json
+lgac-state.json
+lgac.log
+
+# --- TLS certificates / private keys ---
+*.pem
+*.crt
+*.key
+certs/
+
+# --- Editor / OS cruft ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

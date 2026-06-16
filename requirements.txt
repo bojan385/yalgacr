@@ -1,0 +1,13 @@
+# Core dependencies (web app + CLI)
+Flask>=3.0
+pyserial>=3.5
+
+# --- Optional: BME280 temperature/humidity sensor support ---
+# Uncomment what you need.
+#
+# Local sensor on the Pi's own I2C bus:
+# RPi.bme280>=0.2.4
+# smbus2>=0.4.0
+#
+# Remote sensor read over the network (pigpiod running on the sensor's Pi):
+# pigpio>=1.78

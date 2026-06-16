@@ -1,0 +1,76 @@
+# /etc/systemd/system/lgac-web.service on RPI A (192.168.200.20)
+# Runs the LG AC web remote (lgac-web.py) as a background service so the
+# scheduler keeps firing and logging works even when no one is logged in.
+#
+# BEFORE INSTALLING, adjust the three paths/user below to your setup:
+#   - User / Group        : the account that owns the install directory
+#   - WorkingDirectory     : the folder that holds lgac-web.py
+#                            (lgac-config.json, lgac-state.json and lgac.log
+#                             are created here, so it must be writable)
+#   - ExecStart            : full path to lgac-web.py
+#
+# Install:
+#   sudo cp lgac-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now lgac-web
+#   systemctl status lgac-web
+#   journalctl -u lgac-web -f      # live logs (scheduler fires, errors, ...)
+
+[Unit]
+Description=LG AC web remote (Flask)
+After=network-online.target
+Wants=network-online.target
+# If it crash-loops on startup (bad config, port in use, ...), stop trying
+# after a few rapid failures and wait for a manual restart.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lgac
+# Port, protocol, IR Toy target etc. all come from lgac-config.json; the app
+# binds to 0.0.0.0 by default, so it is reachable on the LAN with no flags.
+ExecStart=/usr/bin/python3 /home/pi/lgac/lgac-web.py
+Restart=always
+RestartSec=3
+# Flush print()/stderr to the journal immediately instead of buffering.
+Environment=PYTHONUNBUFFERED=1
+
+# --- Security hardening ---
+# Keep the system tree read-only; the app still writes its config/state/log
+# under WorkingDirectory. If you install OUTSIDE /home, uncomment ReadWritePaths
+# below and point it at the install directory.
+ProtectSystem=full
+#ReadWritePaths=/home/pi/lgac
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The app only talks IP (and local sockets); block other socket families.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Note: MemoryDenyWriteExecute is intentionally NOT set -- the optional native
+# sensor libs (RPi.bme280 / smbus2 / pigpio) can break under it.
+
+# This unit assumes a REMOTE IR Toy (shared over TCP by irtoy-socat on the
+# other Pi), so no serial-device access is needed. If you instead run the IR
+# Toy locally on THIS Pi, also add:
+#   SupplementaryGroups=dialout
+#   DevicePolicy=closed
+#   DeviceAllow=/dev/ttyACM0 rw
+
+# Resource caps.
+LimitNOFILE=1024
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
