@@ -57,7 +57,7 @@ except ImportError:
 try:
     from flask import (Flask, request, jsonify, Response, session,
                        redirect, url_for, abort)
-    from werkzeug.serving import make_server
+    from werkzeug.serving import make_server, ThreadedWSGIServer
 except ImportError:
     sys.exit("Flask is not installed:  sudo apt install python3-flask")
 
@@ -85,6 +85,14 @@ SESSION_LIFETIME_DAYS = 7
 # Default bind address. The server protocol, ports and IR connection all live
 # in lgac-config.json and are managed from the Settings page.
 WEB_HOST = "0.0.0.0"
+
+# Seconds a TLS handshake may take before the connection is aborted. Werkzeug's
+# server runs the handshake inside its single accept loop, so a client that
+# opens an HTTPS connection but never completes the handshake (typically a port
+# scanner / bot probing an exposed Pi) would otherwise wedge the whole HTTPS
+# listener forever. A real handshake completes in milliseconds, so this bound is
+# never reached by legitimate clients. Set 0 / None to disable the fix.
+SSL_HANDSHAKE_TIMEOUT_S = 10
 
 IR_REPEAT = 1               # how many times to send each frame
 
@@ -1025,6 +1033,61 @@ def _build_ssl_context():
     return ctx
 
 
+def _make_timeout_server(host, port, wsgi_app, ssl_context):
+    """Build the WSGI server, bounding the TLS handshake with a timeout.
+
+    Werkzeug's server performs the TLS handshake synchronously inside its
+    single accept loop, with no timeout. A client that connects to the HTTPS
+    port but never finishes the handshake (a port scanner / bot, which hammer
+    any internet-exposed host) blocks do_handshake() forever and wedges the
+    whole HTTPS listener: HTTP keeps working, the process stays "running", but
+    nothing new connects over HTTPS until a restart. threaded=True does NOT
+    help -- the per-connection worker thread is only spawned after
+    get_request() returns, and the hang is inside get_request() itself.
+
+    The fix: wrap the listening socket with do_handshake_on_connect=False so
+    accept() returns the connection WITHOUT handshaking, then run the handshake
+    explicitly under a socket timeout. A stalled handshake then raises after
+    SSL_HANDSHAKE_TIMEOUT_S and the accept loop carries on, instead of hanging
+    forever. (Wrapping with the default do_handshake_on_connect=True would do
+    the handshake inside accept() -- before settimeout() runs -- so the timeout
+    would never apply and the hang would NOT be prevented.) After a successful
+    handshake the socket is set back to blocking so normal request handling and
+    any long-lived connections are unaffected.
+    """
+    timeout = SSL_HANDSHAKE_TIMEOUT_S
+    # Disabled, or plain HTTP (no handshake to bound): stock threaded server.
+    if not timeout or ssl_context is None:
+        return make_server(host, port, wsgi_app, threaded=True,
+                           ssl_context=ssl_context)
+
+    class _TimeoutHandshakeServer(ThreadedWSGIServer):
+        def get_request(self):
+            # accept() returns an un-handshaken socket (see wrap below), so we
+            # can set a timeout and run the handshake under it ourselves.
+            conn, addr = self.socket.accept()
+            try:
+                conn.settimeout(timeout)
+                conn.do_handshake()          # bounded by the timeout above
+                conn.settimeout(None)        # back to blocking for the request
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                raise                        # let the accept loop continue
+            return conn, addr
+
+    # Build without an ssl_context so werkzeug leaves the listening socket
+    # plain, then wrap it ourselves with do_handshake_on_connect=False -- the
+    # part that actually makes the timeout effective.
+    srv = _TimeoutHandshakeServer(host, port, wsgi_app)
+    srv.ssl_context = ssl_context
+    srv.socket = ssl_context.wrap_socket(srv.socket, server_side=True,
+                                         do_handshake_on_connect=False)
+    return srv
+
+
 def serve_loop(bind_host):
     """Build and run the listener; rebuild on shutdown (restart) until stop."""
     global _server
@@ -1048,8 +1111,7 @@ def serve_loop(bind_host):
                       file=sys.stderr)
 
         try:
-            srv = make_server(bind_host, port, app, threaded=True,
-                              ssl_context=ssl_ctx)
+            srv = _make_timeout_server(bind_host, port, app, ssl_ctx)
         except OSError as e:
             print(f"FATAL: cannot bind {bind_host}:{port}: {e}", file=sys.stderr)
             return
@@ -1171,7 +1233,7 @@ def index():
     with _state_lock:
         last = _state.get("last_action", "")
         last_t = _state.get("last_action_time", "")
-    last_html = ("Last action " + html.escape(last_t) + ": " + html.escape(last)) if last else ""
+    last_html = ("Last action: " + html.escape(last) + " at " + html.escape(last_t)) if last else ""
     page = INDEX_HTML.replace("/*__LCD_THEME__*/", theme)
     page = page.replace("__IR_COOLDOWN_MS__", str(int(IR_COOLDOWN_SEC * 1000)))
     page = page.replace("__LAST_ACTION__", last_html)
@@ -2237,7 +2299,7 @@ async function send(action, params) {
       renderState();
       lastUpdated = state.updated;
       baselineSet = true;
-      $('lastFrame').textContent = 'Last action ' + j.time + ': ' + j.event;
+      $('lastFrame').textContent = 'Last action: ' + j.event + ' at ' + j.time;
       toast(j.event, 'ok');
       cooldownUntil = Date.now() + IR_COOLDOWN_MS;
     } else if (r.status === 429) {
